@@ -2300,7 +2300,7 @@
 
   <script>
     const GROQ_KEY = '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';
-    let weekPlan = [], currentDay = 0, likedMeals = new Set(), chatHistory = [], chatOpen = false;
+    let weekPlan = [], currentDay = 0, likedMeals = {}, chatHistory = [], chatOpen = false;
     let currentUser = null;
 
     // NAV
@@ -2686,7 +2686,7 @@ Provide raw JSON matching EXACTLY this structure schema:
       const moodEmojis = { focus: '🧠 Focus Boost', stress: '🧘 Stress Relief', sleep: '🌙 Better Sleep', energy: '⚡ High Energy' };
 
       document.getElementById('meals-grid').innerHTML = plan.meals.map((meal, i) => {
-        const liked = likedMeals.has(meal.name);
+        const liked = !!likedMeals[meal.name];
         const isMoodMatch = plan.moodTarget && plan.moodTarget !== 'none' && meal.moods && meal.moods.includes(plan.moodTarget);
         const completedKey = plan.day + '-' + i + '-' + meal.name;
         const completed = (window.completedMeals || {})[completedKey];
@@ -2766,24 +2766,37 @@ Provide raw JSON matching EXACTLY this structure schema:
 
     // LIKE
     function toggleLike(btn, name) {
-      if (likedMeals.has(name)) { likedMeals.delete(name); btn.classList.remove('liked'); btn.textContent = '🤍'; showToast('Removed from saved meals') }
-      else { likedMeals.add(name); btn.classList.add('liked'); btn.textContent = '❤️'; showToast('💚 Saved to favourites!') }
+      if (likedMeals[name]) {
+        delete likedMeals[name];
+        btn.classList.remove('liked'); btn.textContent = '🤍'; showToast('Removed from saved meals');
+      } else {
+        let found = null;
+        if (weekPlan) weekPlan.forEach(d => d.meals.forEach(m => { if (m.name === name) found = m; }));
+        if (!found) {
+          const all = [...DB.breakfast, ...DB.lunch, ...DB.dinner, ...DB.snack];
+          found = all.find(m => m.name === name);
+        }
+        if (found) {
+          likedMeals[name] = found;
+          btn.classList.add('liked'); btn.textContent = '❤️'; showToast('💚 Saved to favourites!');
+        }
+      }
       saveProfileToStorage();
     }
 
     function renderLiked() {
       const grid = document.getElementById('liked-grid');
-      if (!likedMeals.size) { grid.innerHTML = '<div class="liked-empty"><div class="liked-empty-icon">💚</div><h3>No saved meals yet</h3><p>Heart meals from your plan to save them here.</p></div>'; return }
-      const all = [...DB.breakfast, ...DB.lunch, ...DB.dinner, ...DB.snack];
-      grid.innerHTML = all.filter(m => likedMeals.has(m.name)).map(meal => `
+      const likedArr = Object.values(likedMeals);
+      if (!likedArr.length) { grid.innerHTML = '<div class="liked-empty"><div class="liked-empty-icon">💚</div><h3>No saved meals yet</h3><p>Heart meals from your plan to save them here.</p></div>'; return }
+      grid.innerHTML = likedArr.map(meal => `
     <div class="meal-card">
       <div class="meal-card-img">
         <span style="z-index:1;position:relative">${meal.emoji}</span>
         <button class="meal-like-btn liked" onclick="unlikeSaved(this,'${meal.name}')">❤️</button>
       </div>
       <div class="meal-card-body">
-        <div class="meal-name" ${completed ? 'style="text-decoration:line-through;opacity:0.5"' : ''}>${meal.name}</div>
-      < div class= "meal-desc" > ${meal.desc}</div >
+        <div class="meal-name">${meal.name}</div>
+        <div class="meal-desc">${meal.desc}</div>
         <div class="meal-macros">
           <div class="macro-item"><span class="macro-val">${meal.cal}</span><span class="macro-label">kcal</span></div>
           <div class="macro-item"><span class="macro-val">${meal.protein}g</span><span class="macro-label">Protein</span></div>
@@ -2796,7 +2809,7 @@ Provide raw JSON matching EXACTLY this structure schema:
     }
 
     function unlikeSaved(btn, name) {
-      likedMeals.delete(name);
+      delete likedMeals[name];
       const card = btn.closest('.meal-card');
       card.style.transition = 'all .3s'; card.style.opacity = '0'; card.style.transform = 'scale(.9)';
       setTimeout(() => renderLiked(), 300);
@@ -3078,7 +3091,7 @@ Respond ONLY with a valid JSON object matching exactly this schema and nothing e
       if (document.getElementById('inp-meals')) document.getElementById('inp-meals').value = '3';
 
       document.querySelectorAll('.chip-group .chip').forEach(c => c.classList.remove('selected'));
-      likedMeals = new Set();
+      likedMeals = {};
       weekPlan = [];
       if (typeof renderLiked === 'function') renderLiked();
       if (document.getElementById('meals-grid')) document.getElementById('meals-grid').innerHTML = '';
@@ -3112,7 +3125,7 @@ Respond ONLY with a valid JSON object matching exactly this schema and nothing e
         medical: [...document.querySelectorAll('#medical .chip.selected')].map(c => c.dataset.val),
         cuisine: [...document.querySelectorAll('#cuisine .chip.selected')].map(c => c.dataset.val),
         meals: document.getElementById('inp-meals').value,
-        likedMeals: [...likedMeals]
+        likedMeals: Object.values(likedMeals)
       };
     }
     function saveProfileToStorage() {
@@ -3150,7 +3163,16 @@ Respond ONLY with a valid JSON object matching exactly this schema and nothing e
       if (prof.cuisine) applyChips('cuisine', prof.cuisine);
 
       if (prof.likedMeals) {
-        likedMeals = new Set(prof.likedMeals);
+        likedMeals = {};
+        prof.likedMeals.forEach(m => {
+          if (typeof m === 'string') {
+            const all = [...DB.breakfast, ...DB.lunch, ...DB.dinner, ...DB.snack];
+            const found = all.find(x => x.name === m);
+            if (found) likedMeals[m] = found;
+          } else {
+            likedMeals[m.name] = m;
+          }
+        });
         if (document.getElementById('page-liked').classList.contains('active')) renderLiked();
       }
     }
